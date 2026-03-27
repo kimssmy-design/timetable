@@ -3,19 +3,14 @@ import pandas as pd
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-# 1. 페이지 설정 (중요: 모바일은 기본이 좁으므로 centered 유지)
+# 1. 페이지 설정
 st.set_page_config(page_title="수업일지 매니저", layout="centered")
 
-# --- CSS 스타일링 (갤럭시 핸드폰 화면에 꽉 차게 전면 수정) ---
+# --- CSS 스타일링 (갤럭시 모바일 최적화) ---
 st.markdown("""
     <style>
-    /* 전체 배경색 살짝 조정 */
     .main { background-color: #fcfcfc; }
-    
-    /* 제목 폰트 크기 조절 */
     h1 { font-size: 1.8rem !important; padding-bottom: 10px; }
-    
-    /* 버튼: 가독성 높이고 터치하기 좋게 크게 */
     .stButton>button {
         width: 100%;
         border-radius: 10px;
@@ -25,35 +20,26 @@ st.markdown("""
         margin-bottom: 8px;
         border: 1px solid #ddd;
     }
-    
-    /* 체크박스 크기 및 간격 */
-    .stCheckbox {
-        padding: 10px 0px;
-        font-size: 1.1rem;
-    }
-    
-    /* 입력창(Text Input/Area) 높이 조절 */
+    .stCheckbox { padding: 10px 0px; font-size: 1.1rem; }
     .stTextInput>div>div>input, .stTextArea>div>div>textarea {
-        font-size: 16px !important; /* 모바일 아이폰/갤럭시 줌 방지 */
+        font-size: 16px !important;
     }
-
-    /* 위젯 간 간격 좁히기 */
     .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+        padding-top: 2rem; padding-bottom: 2rem;
+        padding-left: 1rem; padding-right: 1rem;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 구글 시트 연결 설정 (기존과 동일) ---
-URL = "선생님의_구글_시트_주소를_여기에_넣으세요"
+# --- 구글 시트 연결 설정 ---
+
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_last_record(class_name):
+    """해당 학급의 마지막 기록을 시트에서 실시간으로 가져옴 (ttl=0 수정)"""
     try:
-        df = conn.read(spreadsheet=URL)
+        # ttl=0 추가: 캐시를 사용하지 않고 즉시 시트에서 읽어옴
+        df = conn.read(spreadsheet=URL, ttl=0)
         class_data = df[df['학급'] == class_name]
         if not class_data.empty:
             return class_data.iloc[-1]
@@ -64,11 +50,9 @@ def get_last_record(class_name):
 # --- 앱 UI 시작 ---
 st.title("📑 수업일지 매니저")
 
-# 학년 선택 (가로로 넓게 배치)
 grade = st.radio("학년 선택", ["2학년", "3학년"], horizontal=True)
 
 st.write("📍 **반 선택**")
-# 4열에서 2열로 변경 (모바일에서 버튼이 안 깨지도록)
 col_a, col_b = st.columns(2)
 
 if 'selected_class' not in st.session_state:
@@ -85,15 +69,16 @@ if st.session_state.selected_class:
     selected = st.session_state.selected_class
     st.success(f"**{selected}** 기록 중")
     
-    # 2. 지난 기록 불러오기
+    # 2. 지난 기록 불러오기 (ttl=0이 적용된 함수 호출)
     last_data = get_last_record(selected)
     with st.expander("📅 지난 수업 복기", expanded=False):
         if last_data is not None:
+            # 시트의 컬럼명과 일치하는지 확인하세요 (날짜, 내용, 숙제)
             st.info(f"마지막({last_data['날짜']}):\n- {last_data['내용']}\n- 숙제: {last_data['숙제']}")
         else:
             st.write("기록 없음")
 
-    # 3. 오늘의 루틴 (모바일은 가로 columns보다 세로가 나음)
+    # 3. 오늘의 루틴 입력
     st.subheader("📝 수업 루틴")
     
     is_writing = st.checkbox("🖊️ 판서 완료")
@@ -104,7 +89,7 @@ if st.session_state.selected_class:
     details = st.text_area("📖 활동 내용", height=100)
     homework_msg = st.text_input("📢 다음 시간 숙제")
 
-    # 4. 저장 버튼 (눈에 띄게 배치)
+    # 4. 저장 버튼
     st.markdown("---")
     if st.button("💾 기록 저장하기"):
         new_row = pd.DataFrame([{
@@ -119,11 +104,17 @@ if st.session_state.selected_class:
         }])
         
         try:
-            existing_df = conn.read(spreadsheet=URL)
+            # 저장할 때도 최신 데이터를 읽어와서 합침
+            existing_df = conn.read(spreadsheet=URL, ttl=0)
             updated_df = pd.concat([existing_df, new_row], ignore_index=True)
             conn.update(spreadsheet=URL, data=updated_df)
+            
             st.balloons()
             st.success("저장 완료!")
+            
+            # 중요: 저장 후 앱을 새로고침하여 상단 '복기' 내용을 최신화함
+            st.rerun()
+            
         except Exception as e:
             st.error(f"실패: {e}")
 else:
