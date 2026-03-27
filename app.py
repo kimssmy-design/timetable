@@ -6,45 +6,39 @@ from streamlit_gsheets import GSheetsConnection
 # 1. 페이지 설정
 st.set_page_config(page_title="수업일지 매니저", layout="centered")
 
-# --- CSS 스타일링 (갤럭시 모바일 최적화) ---
+# --- CSS 스타일링 (동일) ---
 st.markdown("""
     <style>
     .main { background-color: #fcfcfc; }
     h1 { font-size: 1.8rem !important; padding-bottom: 10px; }
     .stButton>button {
-        width: 100%;
-        border-radius: 10px;
-        height: 3.8em;
-        font-size: 1rem;
-        font-weight: 600;
-        margin-bottom: 8px;
-        border: 1px solid #ddd;
+        width: 100%; border-radius: 10px; height: 3.8em;
+        font-size: 1rem; font-weight: 600; margin-bottom: 8px; border: 1px solid #ddd;
     }
     .stCheckbox { padding: 10px 0px; font-size: 1.1rem; }
-    .stTextInput>div>div>input, .stTextArea>div>div>textarea {
-        font-size: 16px !important;
-    }
-    .block-container {
-        padding-top: 2rem; padding-bottom: 2rem;
-        padding-left: 1rem; padding-right: 1rem;
-    }
+    .stTextInput>div>div>input, .stTextArea>div>div>textarea { font-size: 16px !important; }
+    .block-container { padding: 2rem 1rem; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- 구글 시트 연결 설정 ---
-
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_last_record(class_name):
-    """해당 학급의 마지막 기록을 시트에서 실시간으로 가져옴 (ttl=0 수정)"""
     try:
-        # ttl=0 추가: 캐시를 사용하지 않고 즉시 시트에서 읽어옴
+        # ttl=0으로 최신 데이터 강제 로드
         df = conn.read(spreadsheet=URL, ttl=0)
-        class_data = df[df['학급'] == class_name]
+        
+        # [수정포인트 1] 학급 열의 데이터와 찾는 이름을 모두 '공백 제거' 후 비교
+        df['학급'] = df['학급'].astype(str).str.strip()
+        search_target = str(class_name).strip()
+        
+        class_data = df[df['학급'] == search_target]
+        
         if not class_data.empty:
             return class_data.iloc[-1]
         return None
-    except:
+    except Exception as e:
         return None
 
 # --- 앱 UI 시작 ---
@@ -58,6 +52,7 @@ col_a, col_b = st.columns(2)
 if 'selected_class' not in st.session_state:
     st.session_state.selected_class = None
 
+# 버튼 클릭 로직
 with col_a:
     if st.button("1반"): st.session_state.selected_class = f"{grade} 1반"
     if st.button("3반"): st.session_state.selected_class = f"{grade} 3반"
@@ -69,22 +64,23 @@ if st.session_state.selected_class:
     selected = st.session_state.selected_class
     st.success(f"**{selected}** 기록 중")
     
-    # 2. 지난 기록 불러오기 (ttl=0이 적용된 함수 호출)
+    # [수정포인트 2] 데이터 불러오기 로직 강화
     last_data = get_last_record(selected)
     with st.expander("📅 지난 수업 복기", expanded=False):
         if last_data is not None:
-            # 시트의 컬럼명과 일치하는지 확인하세요 (날짜, 내용, 숙제)
-            st.info(f"마지막({last_data['날짜']}):\n- {last_data['내용']}\n- 숙제: {last_data['숙제']}")
+            # .get()을 사용해 해당 컬럼이 없어도 에러가 나지 않게 방어
+            d_val = last_data.get('날짜', '-')
+            c_val = last_data.get('내용', '기록된 내용이 없습니다.')
+            h_val = last_data.get('숙제', '없음')
+            st.info(f"마지막({d_val}):\n- 내용: {c_val}\n- 숙제: {h_val}")
         else:
-            st.write("기록 없음")
+            st.warning("이 학급의 이전 기록을 찾을 수 없습니다.")
 
     # 3. 오늘의 루틴 입력
     st.subheader("📝 수업 루틴")
-    
     is_writing = st.checkbox("🖊️ 판서 완료")
     is_checking = st.checkbox("🔎 필기 검사")
     is_homework_check = st.checkbox("🏠 숙제 확인")
-        
     v_title = st.text_input("🎬 시청한 동영상")
     details = st.text_area("📖 활동 내용", height=100)
     homework_msg = st.text_input("📢 다음 시간 숙제")
@@ -104,17 +100,12 @@ if st.session_state.selected_class:
         }])
         
         try:
-            # 저장할 때도 최신 데이터를 읽어와서 합침
             existing_df = conn.read(spreadsheet=URL, ttl=0)
             updated_df = pd.concat([existing_df, new_row], ignore_index=True)
             conn.update(spreadsheet=URL, data=updated_df)
-            
             st.balloons()
             st.success("저장 완료!")
-            
-            # 중요: 저장 후 앱을 새로고침하여 상단 '복기' 내용을 최신화함
             st.rerun()
-            
         except Exception as e:
             st.error(f"실패: {e}")
 else:
