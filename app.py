@@ -25,20 +25,22 @@ st.markdown("""
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_last_record(class_name):
+    """시크릿 설정을 사용하여 실시간으로 최신 기록을 가져옴"""
     try:
-        # ttl=0으로 최신 데이터 강제 로드
-        df = conn.read(spreadsheet=URL, ttl=0)
+        # spreadsheet=URL 인자를 제거하고 시크릿의 설정을 따릅니다.
+        df = conn.read(ttl=0) 
         
-        # [수정포인트 1] 학급 열의 데이터와 찾는 이름을 모두 '공백 제거' 후 비교
+        # 학급명 매칭 (공백 제거 및 문자열 변환)
         df['학급'] = df['학급'].astype(str).str.strip()
         search_target = str(class_name).strip()
         
         class_data = df[df['학급'] == search_target]
-        
         if not class_data.empty:
             return class_data.iloc[-1]
         return None
     except Exception as e:
+        # 에러가 나면 화면에 표시하여 원인을 알 수 있게 함
+        st.error(f"데이터 읽기 오류: {e}")
         return None
 
 # --- 앱 UI 시작 ---
@@ -52,7 +54,6 @@ col_a, col_b = st.columns(2)
 if 'selected_class' not in st.session_state:
     st.session_state.selected_class = None
 
-# 버튼 클릭 로직
 with col_a:
     if st.button("1반"): st.session_state.selected_class = f"{grade} 1반"
     if st.button("3반"): st.session_state.selected_class = f"{grade} 3반"
@@ -64,11 +65,10 @@ if st.session_state.selected_class:
     selected = st.session_state.selected_class
     st.success(f"**{selected}** 기록 중")
     
-    # [수정포인트 2] 데이터 불러오기 로직 강화
+    # 데이터 불러오기
     last_data = get_last_record(selected)
     with st.expander("📅 지난 수업 복기", expanded=False):
         if last_data is not None:
-            # .get()을 사용해 해당 컬럼이 없어도 에러가 나지 않게 방어
             d_val = last_data.get('날짜', '-')
             c_val = last_data.get('내용', '기록된 내용이 없습니다.')
             h_val = last_data.get('숙제', '없음')
@@ -88,6 +88,7 @@ if st.session_state.selected_class:
     # 4. 저장 버튼
     st.markdown("---")
     if st.button("💾 기록 저장하기"):
+        # 저장할 데이터 프레임 생성 (생략되었던 부분 추가)
         new_row = pd.DataFrame([{
             "날짜": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "학급": selected,
@@ -100,13 +101,17 @@ if st.session_state.selected_class:
         }])
         
         try:
-            existing_df = conn.read(spreadsheet=URL, ttl=0)
+            # 기존 데이터 읽기 (ttl=0)
+            existing_df = conn.read(ttl=0)
+            # 데이터 합치기
             updated_df = pd.concat([existing_df, new_row], ignore_index=True)
-            conn.update(spreadsheet=URL, data=updated_df)
+            # 시트로 업데이트 (spreadsheet=URL 인자 제거)
+            conn.update(data=updated_df) 
+            
             st.balloons()
             st.success("저장 완료!")
-            st.rerun()
+            st.rerun() # 화면 갱신하여 상단 복기 내용 업데이트
         except Exception as e:
-            st.error(f"실패: {e}")
+            st.error(f"저장 실패: {e}")
 else:
     st.info("반 버튼을 클릭해 주세요.")
